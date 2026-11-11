@@ -1,0 +1,15 @@
+# Cache Python
+__pycache__/
+*.py[cod]
+
+# Lingkungan virtual
+.venv/
+venv/
+
+# Data hasil belajar siswa (bersifat pribadi, jangan diunggah)
+hasil_belajar.csv
+data_hasil/
+
+# Pengaturan editor
+.vscode/
+.idea/

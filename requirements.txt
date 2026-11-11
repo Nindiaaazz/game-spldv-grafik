@@ -1,0 +1,9 @@
+# Tidak ada library tambahan yang perlu di-install.
+#
+# Program hanya memakai pustaka bawaan (standard library) Python 3.9 ke atas:
+#   tkinter    - jendela dan canvas (sudah termasuk pada Python untuk Windows)
+#   fractions  - perhitungan pecahan yang tepat
+#   csv        - menyimpan hasil belajar
+#   unittest   - pengujian
+#
+# Jadi perintah "pip install -r requirements.txt" tidak akan memasang apa pun.
