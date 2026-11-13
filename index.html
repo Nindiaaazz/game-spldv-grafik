@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Petualangan Grafik SPLDV</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#2B6CB0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SPLDV Grafik">
+<meta name="application-name" content="SPLDV Grafik">
 <style>
   html, body { margin: 0; padding: 0; background: #EEF3FA; font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
   #wadah { position: relative; width: 100%; max-width: 1100px; margin: 0 auto; aspect-ratio: 1100 / 700; }
@@ -29,6 +38,12 @@
 <p id="catatan">Versi web dari game Python "Petualangan Grafik SPLDV" — SPLDV metode grafik kelas VIII.</p>
 <script>
 "use strict";
+/* =========================================================================
+   PENGATURAN REKAP KE GOOGLE SHEET
+   Tempel URL Web App dari Google Apps Script di antara tanda kutip di bawah.
+   Kalau dibiarkan kosong, hasil hanya tersimpan di browser masing-masing siswa.
+   ========================================================================= */
+const URL_REKAP = "https://script.google.com/macros/s/AKfycbx5F6mxs5MtLe2eK1mur7B0kLdlWX7tRJJxBwZPtlsidH4IGvIfTqshzSAjAfoenPc/exec";
 /* =========================================================================
    LOGIKA MATEMATIKA  (sama dengan spldv_game/logika.py)
    ========================================================================= */
@@ -537,6 +552,27 @@ function simpanRiwayat(baris) {
   catch (e) { return false; }
 }
 
+/* ---------------- kirim ke Google Sheet (opsional) ---------------- */
+const KUNCI_ANTRE = "spldv-grafik-antre-v1";
+function bacaAntre() { try { return JSON.parse(localStorage.getItem(KUNCI_ANTRE) || "[]"); } catch (e) { return []; } }
+function tulisAntre(a) { try { localStorage.setItem(KUNCI_ANTRE, JSON.stringify(a.slice(-100))); } catch (e) {} }
+const statusKirim = { terakhir: "" };
+async function kirimRekap(baris) {
+  if (!URL_REKAP) return;
+  const antre = bacaAntre();
+  if (baris) antre.push(baris);
+  const gagal = [];
+  for (const b of antre) {
+    try {
+      await fetch(URL_REKAP, { method: "POST", mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(b) });
+      statusKirim.terakhir = "terkirim";
+    } catch (e) { gagal.push(b); statusKirim.terakhir = "gagal"; }
+  }
+  tulisAntre(gagal);
+  if (App.layar) App.gambar();
+}
+
 /* ---------------- App & layar ---------------- */
 const App = {
   nama: "", hasil: {}, layar: null, hover: null, mouse: [-1, -1], pesanSalin: "",
@@ -556,12 +592,14 @@ const App = {
   catat(st) {
     const lama = this.hasil[st.level.nomor];
     if (!lama || st.skor >= lama.skor) this.hasil[st.level.nomor] = st;
-    simpanRiwayat({
+    const baris = {
       waktu: new Date().toLocaleString("id-ID"), nama: this.nama || "-", level: st.level.nomor,
       judul: st.level.judul, indikator: st.level.indikator, skor: st.skor, skor_maks: st.skorMaks,
       bintang: st.bintang, tahap_perlu_latihan: st.perluLatihan.join(" | ") || "-",
       rincian: st.catatan.map((c, i) => `${i + 1}.${c.tahap}(salah=${c.salah},petunjuk=${c.petunjuk},pembahasan=${c.pembahasan ? "ya" : "tidak"})`).join("; "),
-    });
+    };
+    simpanRiwayat(baris);
+    kirimRekap(baris);
   },
 };
 
@@ -890,7 +928,10 @@ class LayarHasil {
       garis(36, y - 8, LEBAR - 36, y - 8, W.grid);
     }
     if (maks) tulis(40, y + 4, `Total skor: ${total} dari ${maks}`, 14, true, W.primerGelap);
-    tulis(520, TINGGI - 60, App.pesanSalin || "Data tiap level tersimpan di browser ini. Klik tombol hijau untuk menyalinnya.", 9, false, W.abu, { lebar: 550 });
+    const infoKirim = !URL_REKAP ? "Data tiap level tersimpan di browser ini. Klik tombol hijau untuk menyalinnya."
+      : statusKirim.terakhir === "gagal" ? "Belum terkirim ke guru (cek internet). Akan dikirim ulang otomatis."
+      : "Hasil setiap level otomatis dikirim ke rekap guru.";
+    tulis(520, TINGGI - 60, App.pesanSalin || infoKirim, 9, false, W.abu, { lebar: 550 });
     gambarTombol(this.tombol);
   }
   klik(x, y) { const t = this.tombol.find(t => t.kena(x, y)); if (t) t.aksi(); }
@@ -927,6 +968,7 @@ inputNama.addEventListener("input", () => { App.nama = inputNama.value.trim(); }
 window.addEventListener("resize", () => { aturDPR(); App.gambar(); });
 
 App.ganti(new LayarMenu());
+if (URL_REKAP && bacaAntre().length) kirimRekap(null);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => App.gambar());
 </script>
 </body>

@@ -1,0 +1,17 @@
+{
+  "name": "Petualangan Grafik SPLDV",
+  "short_name": "SPLDV Grafik",
+  "description": "Game belajar SPLDV metode grafik untuk SMP kelas VIII",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#EEF3FA",
+  "theme_color": "#2B6CB0",
+  "lang": "id",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
