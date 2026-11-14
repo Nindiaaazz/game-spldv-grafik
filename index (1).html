@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Petualangan Grafik SPLDV</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#2B6CB0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SPLDV Grafik">
+<meta name="application-name" content="SPLDV Grafik">
+<style>
+  html, body { margin: 0; padding: 0; background: #EEF3FA; font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  #wadah { position: relative; width: 100%; max-width: 1100px; margin: 0 auto; aspect-ratio: 1100 / 700; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: manipulation; cursor: default; }
+  #nama {
+    position: absolute; left: 35.45%; top: 43.57%; width: 29.1%; height: 7.14%;
+    box-sizing: border-box; border: 2px solid #2B6CB0; border-radius: 10px; padding: 0 1.3%;
+    font: inherit; font-size: clamp(12px, 1.7vw, 19px); color: #1A202C; background: #fff; outline: none; display: none;
+  }
+  #nama:focus { border-color: #F6AD55; }
+  #catatan { max-width: 1100px; margin: 6px auto 16px; color: #718096; font-size: 12px; text-align: center; padding: 0 8px; }
+  #putar { display: none; max-width: 1100px; margin: 10px auto 0; padding: 8px 12px; background: #FFF6D9; color: #7B5B12;
+    border: 1px solid #F6AD55; border-radius: 10px; font-size: 14px; text-align: center; }
+  @media (max-width: 700px) and (orientation: portrait) { #putar { display: block; margin: 10px 8px 6px; } }
+</style>
+</head>
+<body>
+<div id="putar">Agar lebih nyaman, putar HP ke posisi mendatar (landscape).</div>
+<div id="wadah">
+  <canvas id="kanvas" width="1100" height="700" aria-label="Game Petualangan Grafik SPLDV"></canvas>
+  <input id="nama" type="text" maxlength="40" placeholder="ketik di sini..." autocomplete="off" aria-label="Nama">
+</div>
+<p id="catatan">Versi web dari game Python "Petualangan Grafik SPLDV" — SPLDV metode grafik kelas VIII.</p>
+<script>
+"use strict";
+/* =========================================================================
+   PENGATURAN REKAP KE GOOGLE SHEET
+   Tempel URL Web App dari Google Apps Script di antara tanda kutip di bawah.
+   Kalau dibiarkan kosong, hasil hanya tersimpan di browser masing-masing siswa.
+   ========================================================================= */
+const URL_REKAP = "https://script.google.com/macros/s/AKfycbx5F6mxs5MtLe2eK1mur7B0kLdlWX7tRJJxBwZPtlsidH4IGvIfTqshzSAjAfoenPc/exec";
+/* =========================================================================
+   LOGIKA MATEMATIKA  (sama dengan spldv_game/logika.py)
+   ========================================================================= */
+const EPS = 1e-9;
+const sama = (a, b) => Math.abs(a - b) < EPS;
+
+function fmt(n) {
+  let s;
+  if (sama(n, Math.round(n))) s = String(Math.round(n));
+  else s = n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
+  return s.replace("-", "−");
+}
+const fmtTitik = (x, y) => `(${fmt(x)}, ${fmt(y)})`;
+
+function bacaAngka(t) {
+  t = t.trim().replace(/−/g, "-").replace(/\s/g, "").replace(",", ".");
+  if (t === "" || t === "-" || t === "." || t === "-.") return null;
+  if (!/^-?\d*\.?\d*$/.test(t)) return null;
+  const v = Number(t);
+  return Number.isFinite(v) ? v : null;
+}
+
+class Persamaan {
+  constructor(a, b, c) { this.a = a; this.b = b; this.c = c; }
+  static suku(k, isi, pertama) {
+    const angka = Math.abs(k) === 1 ? "" : String(Math.abs(k));
+    if (pertama) return (k < 0 ? "−" : "") + angka + isi;
+    return (k < 0 ? "− " : "+ ") + angka + isi;
+  }
+  teks() { return `${Persamaan.suku(this.a, "x", true)} ${Persamaan.suku(this.b, "y", false)} = ${this.c}`; }
+  dipenuhi(x, y) { return sama(this.a * x + this.b * y, this.c); }
+  yJikaX(x) { return (this.c - this.a * x) / this.b; }
+  xJikaY(y) { return (this.c - this.b * y) / this.a; }
+  substitusi(v, n) {
+    const isi = `(${fmt(n)})`;
+    return `${Persamaan.suku(this.a, v === "x" ? isi : "x", true)} ${Persamaan.suku(this.b, v === "y" ? isi : "y", false)} = ${this.c}`;
+  }
+  cek(x, y) {
+    const h = this.a * x + this.b * y;
+    return `${Persamaan.suku(this.a, `(${fmt(x)})`, true)} ${Persamaan.suku(this.b, `(${fmt(y)})`, false)} = ${fmt(h)} ${sama(h, this.c) ? "✓" : "✗"}`;
+  }
+}
+
+function titikPotong(p1, p2) {
+  const det = p1.a * p2.b - p2.a * p1.b;
+  if (det === 0) return null;
+  return [(p1.c * p2.b - p2.c * p1.b) / det, (p1.a * p2.c - p2.a * p1.c) / det];
+}
+
+function potongKotak(p, xmin, xmax, ymin, ymax) {
+  const k = [];
+  for (const x of [xmin, xmax]) { const y = p.yJikaX(x); if (y >= ymin - EPS && y <= ymax + EPS) k.push([x, y]); }
+  for (const y of [ymin, ymax]) { const x = p.xJikaY(y); if (x >= xmin - EPS && x <= xmax + EPS) k.push([x, y]); }
+  const u = [];
+  for (const t of k) if (!u.some(v => sama(v[0], t[0]) && sama(v[1], t[1]))) u.push(t);
+  if (u.length < 2) return null;
+  let best = [u[0], u[1]], d = -1;
+  for (let i = 0; i < u.length; i++) for (let j = i + 1; j < u.length; j++) {
+    const dd = (u[i][0] - u[j][0]) ** 2 + (u[i][1] - u[j][1]) ** 2;
+    if (dd > d) { d = dd; best = [u[i], u[j]]; }
+  }
+  return best;
+}
+
+/* =========================================================================
+   DATA SOAL  (sama dengan spldv_game/data_soal.py)
+   ========================================================================= */
+const T_MODEL = "Menyusun model matematika", T_KOOR = "Menentukan titik koordinat",
+  T_GAMBAR = "Menggambar garis", T_POTONG = "Menentukan titik potong", T_SIMPUL = "Menyimpulkan / menafsirkan hasil";
+
+function langkahHitung(p, v, n) {
+  let koef, sisaVar, hasil, sisa;
+  if (v === "x") { koef = p.b; sisaVar = "y"; hasil = p.yJikaX(n); sisa = p.c - p.a * n; }
+  else { koef = p.a; sisaVar = "x"; hasil = p.xJikaY(n); sisa = p.c - p.b * n; }
+  const b = [p.substitusi(v, n)];
+  const kiri = (koef < 0 ? "−" : "") + (Math.abs(koef) === 1 ? "" : Math.abs(koef)) + sisaVar;
+  b.push(`${kiri} = ${fmt(sisa)}`);
+  if (kiri !== sisaVar) b.push(`${sisaVar} = ${fmt(hasil)}`);
+  return b.join("  →  ");
+}
+
+function langkahKoordinat(p, nama, pasangan) {
+  const L = [], titik = [];
+  for (const [v, n] of pasangan) {
+    let dicari, jawab, t;
+    if (v === "x") { dicari = "y"; jawab = p.yJikaX(n); t = [n, jawab]; }
+    else { dicari = "x"; jawab = p.xJikaY(n); t = [jawab, n]; }
+    titik.push(t);
+    L.push({
+      jenis: "isian", tahap: T_KOOR,
+      pertanyaan: `${nama}:  ${p.teks()}\nJika ${v} = ${fmt(n)}, maka ${dicari} = ... ?`,
+      jawaban: jawab,
+      petunjuk: [
+        `Ganti (substitusi) ${v} dengan ${fmt(n)} pada persamaan ${p.teks()}.`,
+        `${p.substitusi(v, n)}. Hitung bagian yang sudah berupa angka, lalu cari nilai ${dicari}.`,
+      ],
+      pembahasan: `${langkahHitung(p, v, n)}. Jadi diperoleh titik ${fmtTitik(...t)}.`,
+      umpanBenar: `Benar! Jadi titik ${fmtTitik(...t)} terletak pada garis ${p.teks()}.`,
+      titikHasil: t,
+    });
+  }
+  const [t1, t2] = titik;
+  L.push({
+    jenis: "plot", tahap: T_GAMBAR,
+    pertanyaan: `Gambar ${nama.toLowerCase()}  ${p.teks()}.\nKlik DUA titik pada bidang Kartesius yang terletak pada garis ini.`,
+    petunjuk: [
+      `Pakai titik yang sudah kamu hitung tadi: ${fmtTitik(...t1)} dan ${fmtTitik(...t2)}.`,
+      `Untuk titik ${fmtTitik(...t1)}: mulai dari titik O (0, 0), geser ${fmt(t1[0])} satuan pada sumbu x, lalu ${fmt(t1[1])} satuan pada sumbu y. Titik bantu ditandai pada grafik.`,
+    ],
+    pembahasan: `Garis ${p.teks()} melalui titik ${fmtTitik(...t1)} dan ${fmtTitik(...t2)}.`,
+    garis: nama.endsWith("1") ? 0 : 1, titik,
+  });
+  return L;
+}
+
+function langkahPotong(p1, p2) {
+  const [x, y] = titikPotong(p1, p2);
+  return {
+    jenis: "potong", tahap: T_POTONG,
+    pertanyaan: "Kedua garis sudah tergambar.\nKlik TITIK POTONG kedua garis pada grafik.",
+    petunjuk: [
+      "Titik potong adalah titik tempat kedua garis bertemu (bersilangan).",
+      "Arahkan kursor/jari ke persilangan garis dan baca koordinatnya. Titik itu harus memenuhi KEDUA persamaan.",
+    ],
+    pembahasan: `Kedua garis berpotongan di ${fmtTitik(x, y)}. Cek: ${p1.cek(x, y)} dan ${p2.cek(x, y)}.`,
+  };
+}
+
+const pilihan = (tahap, pertanyaan, opsi, petunjuk, pembahasan, umpanBenar) =>
+  ({ jenis: "pilihan", tahap, pertanyaan, opsi, benar: 0, petunjuk, pembahasan, umpanBenar });
+
+function semuaLevel() {
+  const lv = [];
+  { // Level 1
+    const p1 = new Persamaan(2, 1, 8), p2 = new Persamaan(1, -1, 1);
+    lv.push({ nomor: 1, judul: "Pemanasan: Langkah Metode Grafik",
+      indikator: "Employing Mathematical Concepts, Facts, and Procedures",
+      cerita: "Tentukan himpunan penyelesaian SPLDV berikut dengan metode grafik:\n2x + y = 8   dan   x − y = 1",
+      persamaan: [p1, p2], rentang: [-2, 9, -2, 9], grid: 1,
+      langkah: [...langkahKoordinat(p1, "Garis 1", [["x", 0], ["y", 0]]),
+        ...langkahKoordinat(p2, "Garis 2", [["x", 0], ["y", 0]]), langkahPotong(p1, p2),
+        pilihan(T_SIMPUL, "Apa himpunan penyelesaian (HP) dari SPLDV 2x + y = 8 dan x − y = 1?",
+          ["HP = {(3, 2)}", "HP = {(2, 3)}", "HP = {(4, 0), (1, 0)}", "HP = {(0, 8), (0, −1)}"],
+          ["Penyelesaian SPLDV adalah pasangan (x, y) yang memenuhi kedua persamaan sekaligus.",
+           "Pada grafik, pasangan itu adalah titik potong kedua garis. Perhatikan urutannya: (x, y)."],
+          "Titik potong (3, 2) memenuhi kedua persamaan, jadi HP = {(3, 2)}.",
+          "Benar! Titik potong = penyelesaian SPLDV, jadi HP = {(3, 2)}.")] });
+  }
+  { // Level 2
+    const p1 = new Persamaan(1, 1, 8), p2 = new Persamaan(2, 1, 12);
+    lv.push({ nomor: 2, judul: "Siapa yang Benar?", indikator: "Mathematical Reasoning",
+      cerita: "Diketahui SPLDV  x + y = 8  dan  2x + y = 12.\nDua siswa memberikan jawaban berbeda tentang titik potong kedua garis:\nSiswa A menjawab (4, 4), sedangkan siswa B menjawab (3, 5).\nGambarlah kedua garis, lalu tentukan jawaban yang benar beserta alasannya.",
+      persamaan: [p1, p2], rentang: [0, 13, 0, 13], grid: 1,
+      langkah: [...langkahKoordinat(p1, "Garis 1", [["x", 0], ["y", 0]]),
+        ...langkahKoordinat(p2, "Garis 2", [["x", 0], ["y", 0]]), langkahPotong(p1, p2),
+        pilihan(T_SIMPUL, "Siswa A menjawab titik potongnya (4, 4). Siswa B menjawab (3, 5).\nJawaban siapa yang benar?",
+          ["Siswa A", "Siswa B", "Keduanya benar", "Keduanya salah"],
+          ["Bandingkan kedua jawaban dengan titik potong yang kamu temukan pada grafik.",
+           "Substitusikan (3, 5) ke persamaan kedua: 2(3) + 5 = ... Apakah hasilnya 12?"],
+          "Jawaban siswa A benar, karena (4, 4) adalah titik potong kedua garis.",
+          "Benar! Jawaban siswa A, (4, 4), sesuai dengan titik potong pada grafik."),
+        pilihan(T_SIMPUL, "Mengapa jawaban siswa B, (3, 5), salah?",
+          ["(3, 5) hanya memenuhi x + y = 8, tetapi 2(3) + 5 = 11, bukan 12",
+           "(3, 5) tidak memenuhi kedua persamaan", "Karena x harus lebih besar daripada y",
+           "Karena titik potong selalu memiliki x = y"],
+          ["Periksa (3, 5) pada masing-masing persamaan satu per satu.",
+           "3 + 5 = 8 (memenuhi garis 1). Bagaimana dengan 2(3) + 5?"],
+          "(3, 5) terletak pada garis 1 saja (3 + 5 = 8), tetapi tidak pada garis 2 (2(3) + 5 = 11 ≠ 12). Titik potong harus memenuhi kedua persamaan.",
+          "Tepat! Titik yang hanya ada di satu garis bukan titik potong.")] });
+  }
+  { // Level 3
+    const p1 = new Persamaan(1, 1, 5), p2 = new Persamaan(1, 2, 8);
+    lv.push({ nomor: 3, judul: "Setuju atau Tidak?", indikator: "Mathematical Reasoning",
+      cerita: "Diketahui SPLDV  x + y = 5  dan  x + 2y = 8.\nSeorang siswa menyatakan bahwa titik potong kedua garis adalah (2, 3).\nGambarlah kedua garis, lalu periksa apakah pernyataan itu benar.",
+      persamaan: [p1, p2], rentang: [0, 9, 0, 9], grid: 1,
+      langkah: [...langkahKoordinat(p1, "Garis 1", [["x", 0], ["y", 0]]),
+        ...langkahKoordinat(p2, "Garis 2", [["x", 0], ["y", 0]]), langkahPotong(p1, p2),
+        pilihan(T_SIMPUL, "Seorang siswa menyatakan titik potong kedua garis adalah (2, 3).\nApakah kamu setuju? Pilih jawaban dan alasan yang tepat.",
+          ["Setuju, karena 2 + 3 = 5 dan 2 + 2(3) = 8", "Setuju, karena 2 + 3 = 5 saja sudah cukup",
+           "Tidak setuju, karena titik potongnya (3, 2)", "Tidak setuju, karena 2 + 2(3) = 10"],
+          ["Bandingkan pernyataan siswa dengan titik potong pada grafikmu.",
+           "Alasan yang lengkap harus memeriksa KEDUA persamaan, bukan hanya satu."],
+          "Setuju. (2, 3) memenuhi x + y = 5 (2 + 3 = 5) dan x + 2y = 8 (2 + 6 = 8).",
+          "Benar! Pernyataan siswa tepat karena (2, 3) memenuhi kedua persamaan.")] });
+  }
+  { // Level 4
+    const p1 = new Persamaan(2, 1, 11), p2 = new Persamaan(1, 2, 10);
+    const g1 = langkahKoordinat(p1, "Garis 1", [["x", 0], ["x", 5]]);
+    g1[1].petunjuk.unshift("Catatan: jika y = 0, maka x = 5,5 (pecahan, sulit digambar). Karena itu kita pakai x = 5 supaya titiknya bilangan bulat.");
+    lv.push({ nomor: 4, judul: "Belanja Buku dan Pensil", indikator: "Formulating Situations Mathematically",
+      cerita: "Rina membeli 2 buku tulis dan 1 pensil seharga Rp11.000.\nDika membeli 1 buku tulis dan 2 pensil seharga Rp10.000.\nBerapa harga 1 buku tulis dan 1 pensil? Selesaikan dengan metode grafik.",
+      persamaan: [p1, p2], rentang: [0, 12, 0, 12], grid: 1,
+      langkah: [
+        pilihan(T_MODEL, "Misalkan x = harga 1 buku tulis dan y = harga 1 pensil (dalam ribuan rupiah).\nModel matematika yang tepat adalah ...",
+          ["2x + y = 11  dan  x + 2y = 10", "2x + y = 10  dan  x + 2y = 11",
+           "x + 2y = 11  dan  2x + y = 10", "2x + 2y = 21  dan  x + y = 10"],
+          ["Rina: 2 buku dan 1 pensil seharga 11 ribu. Tulis sebagai 2x + 1y = ...",
+           "Dika: 1 buku dan 2 pensil seharga 10 ribu. Tulis sebagai 1x + 2y = ..."],
+          "Rina: 2x + y = 11. Dika: x + 2y = 10.", "Benar! Rina → 2x + y = 11, Dika → x + 2y = 10."),
+        ...g1, ...langkahKoordinat(p2, "Garis 2", [["x", 0], ["y", 0]]), langkahPotong(p1, p2),
+        pilihan(T_SIMPUL, "Titik potongnya (4, 3). Apa artinya dalam soal ini?",
+          ["Harga 1 buku tulis Rp4.000 dan 1 pensil Rp3.000", "Harga 1 buku tulis Rp3.000 dan 1 pensil Rp4.000",
+           "Rina membeli 4 buku dan Dika membeli 3 pensil", "Total belanja Rina dan Dika Rp7.000"],
+          ["Ingat: x = harga buku tulis, y = harga pensil, dalam ribuan rupiah.",
+           "(4, 3) berarti x = 4 dan y = 3. Kalikan dengan Rp1.000."],
+          "x = 4 → buku tulis Rp4.000; y = 3 → pensil Rp3.000. Cek: 2(4) + 3 = 11 dan 4 + 2(3) = 10.",
+          "Benar! Buku tulis Rp4.000 dan pensil Rp3.000.")] });
+  }
+  { // Level 5
+    const p1 = new Persamaan(1, 1, 20), p2 = new Persamaan(2, 4, 56);
+    lv.push({ nomor: 5, judul: "Tempat Parkir", indikator: "Interpreting, Applying, and Evaluating Mathematical Outcomes",
+      cerita: "Di tempat parkir ada 20 kendaraan yang terdiri atas sepeda motor dan mobil.\nJumlah seluruh roda kendaraan tersebut adalah 56.\nBerapa banyak sepeda motor dan mobil? Tafsirkan dan periksa hasilnya.",
+      persamaan: [p1, p2], rentang: [0, 30, 0, 30], grid: 2,
+      langkah: [
+        pilihan(T_MODEL, "Misalkan x = banyak sepeda motor dan y = banyak mobil.\nModel matematika yang tepat adalah ...",
+          ["x + y = 20  dan  2x + 4y = 56", "x + y = 56  dan  2x + 4y = 20",
+           "x + y = 20  dan  4x + 2y = 56", "2x + 4y = 20  dan  x + y = 56"],
+          ["Jumlah kendaraan ada 20, jadi x + y = ...",
+           "Motor beroda 2 dan mobil beroda 4, jadi jumlah roda: 2x + 4y = ..."],
+          "Banyak kendaraan: x + y = 20. Banyak roda: 2x + 4y = 56.",
+          "Benar! x + y = 20 (kendaraan) dan 2x + 4y = 56 (roda)."),
+        ...langkahKoordinat(p1, "Garis 1", [["x", 0], ["y", 0]]),
+        ...langkahKoordinat(p2, "Garis 2", [["x", 0], ["y", 0]]), langkahPotong(p1, p2),
+        pilihan(T_SIMPUL, "Titik potongnya (12, 8). Apa artinya?",
+          ["Ada 12 sepeda motor dan 8 mobil", "Ada 8 sepeda motor dan 12 mobil",
+           "Ada 12 roda motor dan 8 roda mobil", "Ada 20 kendaraan dan 56 roda"],
+          ["Ingat: x = banyak sepeda motor, y = banyak mobil.", "Titik (12, 8) berarti x = 12 dan y = 8."],
+          "x = 12 → 12 sepeda motor; y = 8 → 8 mobil.", "Benar! Ada 12 sepeda motor dan 8 mobil."),
+        { jenis: "isian", tahap: T_SIMPUL,
+          pertanyaan: "Periksa kewajaran hasil: hitung jumlah roda 12 motor dan 8 mobil.\n12 × 2 + 8 × 4 = ... ?",
+          jawaban: 56, petunjuk: ["12 × 2 = 24 roda motor.", "8 × 4 = 32 roda mobil. Jumlahkan keduanya."],
+          pembahasan: "24 + 32 = 56 roda, sesuai dengan soal. Jadi hasilnya masuk akal.",
+          umpanBenar: "Benar! 56 roda, sama dengan soal, jadi hasilnya wajar." },
+        pilihan(T_SIMPUL, "Seorang teman membaca grafik dan menjawab titik potongnya (10,5; 9,5).\nApakah jawaban itu masuk akal untuk soal ini?",
+          ["Tidak, karena banyak kendaraan harus bilangan bulat", "Ya, karena 10,5 + 9,5 = 20",
+           "Ya, karena semua titik di garis adalah jawaban", "Tidak, karena mobil harus lebih banyak daripada motor"],
+          ["Bisakah ada setengah sepeda motor di tempat parkir?",
+           "Selain itu, cek roda: 2(10,5) + 4(9,5) = 21 + 38 = 59, bukan 56."],
+          "Tidak masuk akal: banyak kendaraan harus bilangan bulat, dan 2(10,5) + 4(9,5) = 59 ≠ 56.",
+          "Tepat! Hasil harus dicek kewajarannya sesuai konteks soal.")] });
+  }
+  return lv;
+}
+
+/* =========================================================================
+   STATUS & PENILAIAN
+   ========================================================================= */
+const POIN_LANGSUNG = 10, POIN_DIBANTU = 5;
+
+class StatusLevel {
+  constructor(level) {
+    this.level = level; this.idx = 0;
+    this.catatan = level.langkah.map(l => ({ tahap: l.tahap, salah: 0, petunjuk: 0, pembahasan: false, selesai: false }));
+    this.titikPlot = {}; this.garisSelesai = new Set(); this.potong = null;
+    this.petunjukTampil = []; this.pesan = ""; this.pesanBenar = null;
+  }
+  get langkah() { return this.level.langkah[this.idx] || null; }
+  get selesai() { return this.idx >= this.level.langkah.length; }
+  poin(c) { if (!c.selesai || c.pembahasan) return 0; return (c.salah === 0 && c.petunjuk === 0) ? POIN_LANGSUNG : POIN_DIBANTU; }
+  get skor() { return this.catatan.reduce((s, c) => s + this.poin(c), 0); }
+  get skorMaks() { return POIN_LANGSUNG * this.catatan.length; }
+  get bintang() { const r = this.skor / this.skorMaks; return r >= 0.9 ? 3 : r >= 0.6 ? 2 : r > 0 ? 1 : 0; }
+  get perluLatihan() {
+    const h = [];
+    for (const c of this.catatan) if ((c.salah || c.petunjuk || c.pembahasan) && !h.includes(c.tahap)) h.push(c.tahap);
+    return h;
+  }
+  _lanjut() { this.catatan[this.idx].selesai = true; this.idx++; this.petunjukTampil = []; }
+  _salah(p) { this.catatan[this.idx].salah++; this.pesan = p; this.pesanBenar = false; }
+  _benar(p) { this.pesan = p; this.pesanBenar = true; this._lanjut(); }
+  jawabIsian(teks) {
+    const l = this.langkah, v = bacaAngka(teks);
+    if (v === null) { this.pesan = "Ketik sebuah angka dulu, ya."; this.pesanBenar = false; return false; }
+    if (sama(v, l.jawaban)) { this._benar(l.umpanBenar); return true; }
+    this._salah(`Belum tepat: ${fmt(v)} bukan jawabannya. Coba lagi atau minta petunjuk.`); return false;
+  }
+  jawabPilihan(i) {
+    if (i === this.langkah.benar) { this._benar(this.langkah.umpanBenar); return true; }
+    this._salah("Belum tepat. Baca lagi pilihannya atau minta petunjuk."); return false;
+  }
+  klikTitik(x, y) {
+    const l = this.langkah;
+    if (l.jenis === "plot") {
+      const p = this.level.persamaan[l.garis];
+      const d = this.titikPlot[l.garis] || (this.titikPlot[l.garis] = []);
+      if (!p.dipenuhi(x, y)) {
+        this._salah(`Titik ${fmtTitik(x, y)} tidak terletak pada garis ${p.teks()}, karena hasilnya ${fmt(p.a * x + p.b * y)}, bukan ${p.c}.`);
+        return false;
+      }
+      if (d.some(t => sama(t[0], x) && sama(t[1], y))) {
+        this.pesan = "Titik itu sudah kamu pilih. Pilih titik lain pada garis yang sama."; this.pesanBenar = null; return false;
+      }
+      d.push([x, y]);
+      if (d.length >= 2) { this.garisSelesai.add(l.garis); this._benar(`Mantap! Garis ${p.teks()} sudah tergambar.`); }
+      else { this.pesan = `Titik ${fmtTitik(x, y)} benar. Pilih satu titik lagi.`; this.pesanBenar = true; }
+      return true;
+    }
+    const [p1, p2] = this.level.persamaan, tp = titikPotong(p1, p2);
+    if (sama(x, tp[0]) && sama(y, tp[1])) {
+      this.potong = tp;
+      this._benar(`Tepat! Titik potongnya ${fmtTitik(x, y)}. Titik ini memenuhi kedua persamaan sekaligus.`);
+      return true;
+    }
+    const ok1 = p1.dipenuhi(x, y), ok2 = p2.dipenuhi(x, y);
+    if (ok1 || ok2) this._salah(`Titik ${fmtTitik(x, y)} hanya terletak pada garis ${(ok1 ? p1 : p2).teks()}. Titik potong harus terletak pada KEDUA garis.`);
+    else this._salah(`Titik ${fmtTitik(x, y)} tidak terletak pada garis mana pun.`);
+    return false;
+  }
+  mintaPetunjuk() {
+    const l = this.langkah; if (!l) return;
+    const n = this.petunjukTampil.length;
+    if (n < l.petunjuk.length) { this.petunjukTampil.push(l.petunjuk[n]); this.catatan[this.idx].petunjuk++; }
+  }
+  lihatPembahasan() {
+    const l = this.langkah; if (!l) return;
+    this.catatan[this.idx].pembahasan = true;
+    if (l.jenis === "plot") { this.garisSelesai.add(l.garis); this.titikPlot[l.garis] = l.titik.slice(); }
+    if (l.jenis === "potong") this.potong = titikPotong(...this.level.persamaan);
+    this.pesan = "Pembahasan: " + l.pembahasan; this.pesanBenar = null;
+    this._lanjut();
+  }
+}
+
+/* =========================================================================
+   TAMPILAN
+   ========================================================================= */
+const LEBAR = 1100, TINGGI = 700;
+const FONT = '"Segoe UI", system-ui, -apple-system, Roboto, sans-serif';
+const W = {
+  latar: "#EEF3FA", panel: "#FFFFFF", primer: "#2B6CB0", primerGelap: "#1E4E8C", aksen: "#F6AD55",
+  hijau: "#2F855A", hijauMuda: "#E3F4E8", merah: "#C53030", merahMuda: "#FDECEC", kuningMuda: "#FFF6D9",
+  biruMuda: "#E6F0FB", teks: "#1A202C", abu: "#718096", abuMuda: "#CBD5E0", grid: "#E2E8F0",
+  sumbu: "#2D3748", garis1: "#2B6CB0", garis2: "#DD6B20", potong: "#C53030", nonaktif: "#A0AEC0", bintang: "#F6C23E",
+};
+
+const kanvas = document.getElementById("kanvas");
+const ctx = kanvas.getContext("2d");
+const inputNama = document.getElementById("nama");
+function aturDPR() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  kanvas.width = LEBAR * dpr; kanvas.height = TINGGI * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+aturDPR();
+
+const font = (u, tebal, miring) => `${miring ? "italic " : ""}${tebal ? "bold " : ""}${Math.round(u * 1.33)}px ${FONT}`;
+const tinggiBaris = u => u * 1.75;
+
+function bungkus(teks, lebar, u, tebal) {
+  ctx.font = font(u, tebal);
+  const hasil = [];
+  for (const par of String(teks).split("\n")) {
+    if (par === "") { hasil.push(""); continue; }
+    let baris = "";
+    for (const kata of par.split(" ")) {
+      const coba = baris ? baris + " " + kata : kata;
+      if (ctx.measureText(coba).width > lebar && baris) { hasil.push(baris); baris = kata; }
+      else baris = coba;
+    }
+    hasil.push(baris);
+  }
+  return hasil;
+}
+const tinggiTeks = (t, lebar, u, tebal) => bungkus(t, lebar, u, tebal).length * tinggiBaris(u);
+
+function tulis(x, y, teks, u = 12, tebal = false, warna = W.teks, opsi = {}) {
+  const baris = opsi.lebar ? bungkus(teks, opsi.lebar, u, tebal) : String(teks).split("\n");
+  ctx.font = font(u, tebal, opsi.miring); ctx.fillStyle = warna;
+  ctx.textAlign = opsi.rata || "left"; ctx.textBaseline = "top";
+  baris.forEach((b, i) => ctx.fillText(b, x, y + i * tinggiBaris(u) + u * 0.12));
+  return baris.length * tinggiBaris(u);
+}
+
+function teksTitik(x, y, teks, u, tebal, warna, align = "center", baseline = "middle", miring = false) {
+  ctx.font = font(u, tebal, miring); ctx.fillStyle = warna; ctx.textAlign = align; ctx.textBaseline = baseline;
+  ctx.fillText(teks, x, y);
+}
+
+function kotak(x1, y1, x2, y2, r = 12, isi = "#fff", garis = null, tebal = 1) {
+  r = Math.min(r, (x2 - x1) / 2, (y2 - y1) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x1 + r, y1); ctx.arcTo(x2, y1, x2, y2, r); ctx.arcTo(x2, y2, x1, y2, r);
+  ctx.arcTo(x1, y2, x1, y1, r); ctx.arcTo(x1, y1, x2, y1, r); ctx.closePath();
+  if (isi) { ctx.fillStyle = isi; ctx.fill(); }
+  if (garis) { ctx.strokeStyle = garis; ctx.lineWidth = tebal; ctx.stroke(); }
+}
+function garis(x1, y1, x2, y2, warna, tebal = 1, putus = null) {
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  ctx.strokeStyle = warna; ctx.lineWidth = tebal; ctx.setLineDash(putus || []); ctx.stroke(); ctx.setLineDash([]);
+}
+function panah(x1, y1, x2, y2, warna) {
+  garis(x1, y1, x2, y2, warna, 2);
+  const s = Math.atan2(y2 - y1, x2 - x1), p = 10;
+  ctx.beginPath(); ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - p * Math.cos(s - 0.4), y2 - p * Math.sin(s - 0.4));
+  ctx.lineTo(x2 - p * Math.cos(s + 0.4), y2 - p * Math.sin(s + 0.4));
+  ctx.closePath(); ctx.fillStyle = warna; ctx.fill();
+}
+function lingkaran(cx, cy, r, isi, garisW, tebal = 2, putus = null) {
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (isi) { ctx.fillStyle = isi; ctx.fill(); }
+  if (garisW) { ctx.strokeStyle = garisW; ctx.lineWidth = tebal; ctx.setLineDash(putus || []); ctx.stroke(); ctx.setLineDash([]); }
+}
+function bintang(cx, cy, r, terisi) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const s = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 === 0 ? r : r * 0.45;
+    const x = cx + rr * Math.cos(s), y = cy + rr * Math.sin(s);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath(); ctx.fillStyle = terisi ? W.bintang : W.abuMuda; ctx.fill();
+  ctx.strokeStyle = terisi ? "#B7791F" : W.abu; ctx.lineWidth = 1; ctx.stroke();
+}
+
+class Tombol {
+  constructor(x, y, w, h, label, aksi, o = {}) {
+    Object.assign(this, { x, y, w, h, label, aksi, warna: o.warna || W.primer, warnaTeks: o.warnaTeks || "#fff",
+      ukuran: o.ukuran || 12, aktif: o.aktif !== false, rata: o.rata || "center" });
+  }
+  kena(x, y) { return this.aktif && x >= this.x && x <= this.x + this.w && y >= this.y && y <= this.y + this.h; }
+  gambar(hover) {
+    const isi = this.aktif ? this.warna : W.nonaktif;
+    kotak(this.x, this.y + 3, this.x + this.w, this.y + this.h + 3, 10, "#C3CEDD");
+    kotak(this.x, this.y, this.x + this.w, this.y + this.h, 10, isi, hover && this.aktif ? W.aksen : null, 2);
+    if (this.rata === "center") {
+      const b = bungkus(this.label, this.w - 16, this.ukuran, true), lh = tinggiBaris(this.ukuran) * 0.85;
+      const y0 = this.y + this.h / 2 - (b.length - 1) * lh / 2;
+      b.forEach((s, i) => teksTitik(this.x + this.w / 2, y0 + i * lh, s, this.ukuran, true, this.warnaTeks));
+    } else {
+      const b = bungkus(this.label, this.w - 28, this.ukuran, false), lh = tinggiBaris(this.ukuran) * 0.9;
+      const y0 = this.y + this.h / 2 - (b.length - 1) * lh / 2;
+      b.forEach((s, i) => teksTitik(this.x + 14, y0 + i * lh, s, this.ukuran, false, this.warnaTeks, "left"));
+    }
+  }
+}
+
+class Grafik {
+  constructor(x, y, ukuran, rentang, langkah = 1) {
+    Object.assign(this, { x, y, ukuran, langkah });
+    [this.xmin, this.xmax, this.ymin, this.ymax] = rentang;
+    this.sx = ukuran / (this.xmax - this.xmin); this.sy = ukuran / (this.ymax - this.ymin);
+  }
+  kePx(x, y) { return [this.x + (x - this.xmin) * this.sx, this.y + this.ukuran - (y - this.ymin) * this.sy]; }
+  dariPx(px, py) {
+    if (px < this.x - 14 || px > this.x + this.ukuran + 14 || py < this.y - 14 || py > this.y + this.ukuran + 14) return null;
+    const s = this.langkah;
+    let gx = Math.round((this.xmin + (px - this.x) / this.sx) / s) * s;
+    let gy = Math.round((this.ymin + (this.y + this.ukuran - py) / this.sy) / s) * s;
+    gx = Math.min(Math.max(gx, this.xmin), this.xmax); gy = Math.min(Math.max(gy, this.ymin), this.ymax);
+    return [gx, gy];
+  }
+  gambarDasar() {
+    const { x: x0, y: y0, ukuran: u, langkah: s } = this;
+    ctx.fillStyle = "#fff"; ctx.fillRect(x0 - 34, y0 - 26, u + 64, u + 60);
+    const tiap = s * Math.max(1, Math.ceil((this.xmax - this.xmin) / s / 15));
+    for (let v = this.xmin; v <= this.xmax + EPS; v += s) { const px = this.kePx(v, 0)[0]; garis(px, y0, px, y0 + u, W.grid); }
+    for (let v = this.ymin; v <= this.ymax + EPS; v += s) { const py = this.kePx(0, v)[1]; garis(x0, py, x0 + u, py, W.grid); }
+    const sxY = (this.ymin <= 0 && 0 <= this.ymax) ? 0 : this.ymin, syX = (this.xmin <= 0 && 0 <= this.xmax) ? 0 : this.xmin;
+    const py0 = this.kePx(0, sxY)[1], px0 = this.kePx(syX, 0)[0];
+    panah(x0, py0, x0 + u + 16, py0, W.sumbu); panah(px0, y0 + u, px0, y0 - 16, W.sumbu);
+    teksTitik(x0 + u + 22, py0, "x", 12, true, W.sumbu, "left", "middle", true);
+    teksTitik(px0, y0 - 20, "y", 12, true, W.sumbu, "center", "bottom", true);
+    for (let v = this.xmin; v <= this.xmax + EPS; v += s) if (v !== syX && v % tiap === 0) {
+      const px = this.kePx(v, 0)[0]; garis(px, py0 - 4, px, py0 + 4, W.sumbu);
+      teksTitik(px, py0 + 7, fmt(v), 8, false, W.abu, "center", "top");
+    }
+    for (let v = this.ymin; v <= this.ymax + EPS; v += s) if (v !== sxY && v % tiap === 0) {
+      const py = this.kePx(0, v)[1]; garis(px0 - 4, py, px0 + 4, py, W.sumbu);
+      teksTitik(px0 - 7, py, fmt(v), 8, false, W.abu, "right", "middle");
+    }
+    if (sxY === 0 && syX === 0) teksTitik(px0 - 6, py0 + 6, "O", 9, true, W.sumbu, "right", "top");
+  }
+  gambarGaris(p, warna, nama = "") {
+    const uj = potongKotak(p, this.xmin, this.xmax, this.ymin, this.ymax);
+    if (!uj) return;
+    const pa = this.kePx(...uj[0]), pb = this.kePx(...uj[1]);
+    garis(...pa, ...pb, warna, 3);
+    let [lx, ly] = pa[1] < pb[1] ? pa : pb;
+    const teks = nama ? `${nama}: ${p.teks()}` : p.teks();
+    ctx.font = font(9, true); const lw = ctx.measureText(teks).width + 10;
+    lx = Math.min(Math.max(lx + 10, this.x + 30), this.x + this.ukuran - lw);
+    ly = Math.min(Math.max(ly + 4, this.y + 4), this.y + this.ukuran - 24);
+    ctx.fillStyle = "#fff"; ctx.fillRect(lx, ly, lw, 20); ctx.strokeStyle = warna; ctx.lineWidth = 1; ctx.strokeRect(lx, ly, lw, 20);
+    teksTitik(lx + 5, ly + 10, teks, 9, true, warna, "left");
+  }
+  titik(x, y, warna, r = 6, label = null, kosong = false) {
+    const [px, py] = this.kePx(x, y);
+    lingkaran(px, py, r, kosong ? "#fff" : warna, warna, 2);
+    if (label) {
+      const kanan = px < this.x + this.ukuran - 80;
+      teksTitik(px + (kanan ? 9 : -9), py - 10, label, 9, true, warna, kanan ? "left" : "right", "bottom");
+    }
+  }
+  proyeksi(x, y, warna) {
+    const [px, py] = this.kePx(x, y);
+    const sx = this.kePx(this.xmin <= 0 ? 0 : this.xmin, 0)[0], sy = this.kePx(0, this.ymin <= 0 ? 0 : this.ymin)[1];
+    garis(px, py, px, sy, warna, 1, [4, 3]); garis(px, py, sx, py, warna, 1, [4, 3]);
+  }
+}
+
+/* ---------------- penyimpanan (localStorage, opsional) ---------------- */
+const KUNCI = "spldv-grafik-hasil-v1";
+function bacaRiwayat() { try { return JSON.parse(localStorage.getItem(KUNCI) || "[]"); } catch (e) { return []; } }
+function simpanRiwayat(baris) {
+  try { const r = bacaRiwayat(); r.push(baris); localStorage.setItem(KUNCI, JSON.stringify(r.slice(-500))); return true; }
+  catch (e) { return false; }
+}
+
+/* ---------------- kirim ke Google Sheet (opsional) ---------------- */
+const KUNCI_ANTRE = "spldv-grafik-antre-v1";
+function bacaAntre() { try { return JSON.parse(localStorage.getItem(KUNCI_ANTRE) || "[]"); } catch (e) { return []; } }
+function tulisAntre(a) { try { localStorage.setItem(KUNCI_ANTRE, JSON.stringify(a.slice(-100))); } catch (e) {} }
+const statusKirim = { terakhir: "" };
+async function kirimRekap(baris) {
+  if (!URL_REKAP) return;
+  const antre = bacaAntre();
+  if (baris) antre.push(baris);
+  const gagal = [];
+  for (const b of antre) {
+    try {
+      await fetch(URL_REKAP, { method: "POST", mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(b) });
+      statusKirim.terakhir = "terkirim";
+    } catch (e) { gagal.push(b); statusKirim.terakhir = "gagal"; }
+  }
+  tulisAntre(gagal);
+  if (App.layar) App.gambar();
+}
+
+/* ---------------- App & layar ---------------- */
+const App = {
+  nama: "", hasil: {}, layar: null, hover: null, mouse: [-1, -1], pesanSalin: "",
+  ganti(l) {
+    this.layar = l; this.mouse = [-1, -1];
+    if (!(l instanceof LayarMenu)) inputNama.blur(); else inputNama.value = this.nama;
+    this.gambar();
+  },
+  gambar() {
+    ctx.clearRect(0, 0, LEBAR, TINGGI);
+    this.layar.gambar();
+    inputNama.style.display = this.layar instanceof LayarMenu ? "block" : "none";
+    const [mx, my] = this.mouse;
+    const di = (this.layar.tombol || []).find(t => t.kena(mx, my));
+    kanvas.style.cursor = di || (this.layar.kursorGrafik && this.layar.kursorGrafik(mx, my)) ? "pointer" : "default";
+  },
+  catat(st) {
+    const lama = this.hasil[st.level.nomor];
+    if (!lama || st.skor >= lama.skor) this.hasil[st.level.nomor] = st;
+    const baris = {
+      waktu: new Date().toLocaleString("id-ID"), nama: this.nama || "-", level: st.level.nomor,
+      judul: st.level.judul, indikator: st.level.indikator, skor: st.skor, skor_maks: st.skorMaks,
+      bintang: st.bintang, tahap_perlu_latihan: st.perluLatihan.join(" | ") || "-",
+      rincian: st.catatan.map((c, i) => `${i + 1}.${c.tahap}(salah=${c.salah},petunjuk=${c.petunjuk},pembahasan=${c.pembahasan ? "ya" : "tidak"})`).join("; "),
+    };
+    simpanRiwayat(baris);
+    kirimRekap(baris);
+  },
+};
+
+function latar(judul, sub) {
+  ctx.fillStyle = W.latar; ctx.fillRect(0, 0, LEBAR, TINGGI);
+  ctx.fillStyle = W.primer; ctx.fillRect(0, 0, LEBAR, 58);
+  if (judul) teksTitik(24, 20, judul, 15, true, "#fff", "left");
+  if (sub) teksTitik(24, 43, sub, 10, false, "#D6E4F5", "left");
+}
+const tombolPojok = (label, aksi, x = LEBAR - 150, w = 130) =>
+  new Tombol(x, 12, w, 34, label, aksi, { warna: "#fff", warnaTeks: W.primer, ukuran: 11 });
+function gambarTombol(daftar) { const [mx, my] = App.mouse; daftar.forEach(t => t.gambar(t.kena(mx, my))); }
+
+class LayarMenu {
+  constructor() {
+    this.pesan = ""; const cx = LEBAR / 2;
+    this.tombol = [
+      new Tombol(cx - 160, 410, 320, 54, "▶  Mulai Bermain", () => this.mulai(), { ukuran: 14 }),
+      new Tombol(cx - 160, 476, 320, 48, "Materi Singkat", () => App.ganti(new LayarMateri(0)), { warna: W.hijau }),
+      new Tombol(cx - 160, 536, 320, 48, "Lihat Hasil Belajar", () => App.ganti(new LayarHasil()), { warna: W.primerGelap }),
+    ];
+  }
+  mulai() {
+    App.nama = inputNama.value.trim();
+    if (!App.nama) { this.pesan = "Tulis namamu dulu, ya!"; App.gambar(); inputNama.focus(); return; }
+    App.ganti(new LayarPilihLevel());
+  }
+  gambar() {
+    ctx.fillStyle = W.latar; ctx.fillRect(0, 0, LEBAR, TINGGI);
+    const g = new Grafik(70, 120, 260, [0, 8, 0, 8]);
+    g.gambarDasar(); g.gambarGaris(new Persamaan(1, 1, 6), W.garis1); g.gambarGaris(new Persamaan(1, -1, 2), W.garis2);
+    g.titik(4, 2, W.potong, 7, "(4, 2)");
+    const cx = LEBAR / 2 + 60;
+    teksTitik(cx, 110, "Petualangan Grafik SPLDV", 30, true, W.primerGelap);
+    teksTitik(cx, 158, "Belajar Sistem Persamaan Linear Dua Variabel dengan metode grafik", 13, false, W.abu);
+    teksTitik(cx, 186, "Tentukan titik → gambar garis → temukan titik potong → simpulkan!", 11, false, W.hijau, "center", "middle", true);
+    teksTitik(LEBAR / 2 - 160, 290, "Nama kamu:", 12, true, W.teks, "left");
+    if (this.pesan) teksTitik(LEBAR / 2, 380, this.pesan, 11, true, W.merah);
+    gambarTombol(this.tombol);
+    teksTitik(LEBAR - 16, TINGGI - 14, "Draft v0.1 (versi web) • SPLDV metode grafik kelas VIII", 9, false, W.abu, "right");
+  }
+  klik(x, y) { const t = this.tombol.find(t => t.kena(x, y)); if (t) t.aksi(); }
+  ketik() {}
+}
+
+const C1 = new Persamaan(1, 1, 4), C2 = new Persamaan(1, -1, 2);
+const MATERI = [
+  ["Apa itu SPLDV?", "SPLDV (Sistem Persamaan Linear Dua Variabel) adalah dua persamaan linear yang memiliki dua variabel yang sama, misalnya x dan y.\n\nContoh:\n   x + y = 4\n   x − y = 2\n\nSetiap persamaan linear dapat digambar sebagai sebuah GARIS LURUS. Semua titik pada garis x + y = 4 memenuhi persamaan itu, misalnya (0, 4), (1, 3), (2, 2), (3, 1), dan (4, 0).\n\nMenyelesaikan SPLDV berarti mencari pasangan (x, y) yang memenuhi KEDUA persamaan."],
+  ["Langkah 1: Tentukan titik koordinat", "Untuk setiap persamaan, cari dua titik. Cara paling mudah:\n\n• Ambil x = 0, lalu hitung y.\n• Ambil y = 0, lalu hitung x.\n\nx + y = 4\n   x = 0  →  0 + y = 4  →  y = 4   titik (0, 4)\n   y = 0  →  x + 0 = 4  →  x = 4   titik (4, 0)\n\nx − y = 2\n   x = 0  →  0 − y = 2  →  y = −2   titik (0, −2)\n   y = 0  →  x − 0 = 2  →  x = 2   titik (2, 0)\n\nIngat: titik ditulis (x, y). x dulu (mendatar), baru y (tegak)."],
+  ["Langkah 2: Gambar kedua garis", "Letakkan titik-titik tadi pada bidang Kartesius:\n\n• (0, 4): dari titik O, geser 0 ke kanan, naik 4.\n• (4, 0): dari titik O, geser 4 ke kanan, tidak naik.\n\nHubungkan dua titik dari persamaan yang sama dengan garis lurus. Lakukan untuk kedua persamaan, sehingga diperoleh dua garis.\n\nTips: jika hasilnya pecahan (misalnya 5,5), pilih nilai x lain agar titiknya bilangan bulat dan mudah digambar."],
+  ["Langkah 3: Titik potong = penyelesaian", "Kedua garis berpotongan di titik (3, 1).\n\nMengapa titik potong menjadi penyelesaian?\n• Titik itu ada di garis x + y = 4, jadi memenuhi persamaan pertama: 3 + 1 = 4 ✓\n• Titik itu juga ada di garis x − y = 2, jadi memenuhi persamaan kedua: 3 − 1 = 2 ✓\n\nHanya titik potong yang terletak di KEDUA garis. Jadi:\n   Himpunan penyelesaian = {(3, 1)}\n\nPada soal cerita, artikan kembali x dan y sesuai konteks, lalu periksa apakah hasilnya masuk akal."],
+];
+
+class LayarMateri {
+  constructor(hal) {
+    this.hal = hal; const n = MATERI.length;
+    this.tombol = [
+      new Tombol(24, 630, 150, 44, "◀ Sebelumnya", () => App.ganti(new LayarMateri(hal - 1)), { aktif: hal > 0, warna: W.primerGelap }),
+      new Tombol(190, 630, 150, 44, "Berikutnya ▶", () => App.ganti(new LayarMateri(hal + 1)), { aktif: hal < n - 1 }),
+      new Tombol(356, 630, 190, 44, "Mulai Bermain", () => App.ganti(App.nama ? new LayarPilihLevel() : new LayarMenu()), { warna: W.hijau }),
+      tombolPojok("⌂ Menu", () => App.ganti(new LayarMenu())),
+    ];
+  }
+  gambar() {
+    const [judul, isi] = MATERI[this.hal];
+    latar("Materi Singkat: SPLDV Metode Grafik", `Halaman ${this.hal + 1} dari ${MATERI.length}`);
+    kotak(20, 76, 560, 612, 16, W.panel);
+    tulis(44, 96, judul, 16, true, W.primerGelap, { lebar: 495 });
+    tulis(44, 140, isi, 12, false, W.teks, { lebar: 495 });
+    const g = new Grafik(625, 100, 420, [-3, 7, -3, 7]); g.gambarDasar();
+    if (this.hal === 0) { g.gambarGaris(C1, W.garis1); for (let x = 0; x <= 4; x++) g.titik(x, 4 - x, W.garis1, 5, fmtTitik(x, 4 - x)); }
+    else if (this.hal === 1) {
+      [[0, 4], [4, 0]].forEach(t => g.titik(...t, W.garis1, 6, fmtTitik(...t)));
+      [[0, -2], [2, 0]].forEach(t => g.titik(...t, W.garis2, 6, fmtTitik(...t)));
+    } else {
+      g.gambarGaris(C1, W.garis1, "Garis 1"); g.gambarGaris(C2, W.garis2, "Garis 2");
+      [[0, 4], [4, 0]].forEach(t => g.titik(...t, W.garis1, 5)); [[0, -2], [2, 0]].forEach(t => g.titik(...t, W.garis2, 5));
+      if (this.hal === 3) { g.proyeksi(3, 1, W.potong); g.titik(3, 1, W.potong, 8, "Titik potong (3, 1)"); }
+    }
+    gambarTombol(this.tombol);
+  }
+  klik(x, y) { const t = this.tombol.find(t => t.kena(x, y)); if (t) t.aksi(); }
+  ketik(k) {
+    if (k === "ArrowRight" && this.hal < MATERI.length - 1) App.ganti(new LayarMateri(this.hal + 1));
+    if (k === "ArrowLeft" && this.hal > 0) App.ganti(new LayarMateri(this.hal - 1));
+  }
+}
+
+class LayarPilihLevel {
+  constructor() {
+    this.levels = semuaLevel();
+    this.tombol = [tombolPojok("⌂ Menu", () => App.ganti(new LayarMenu())),
+      tombolPojok("Materi", () => App.ganti(new LayarMateri(0)), LEBAR - 300, 140)];
+    this.kartu = this.levels.map((lv, i) => {
+      const kol = i % 3, bar = Math.floor(i / 3);
+      const x = 40 + kol * 345 + (bar === 1 ? 172 : 0), y = 100 + bar * 285;
+      this.tombol.push(new Tombol(x + 20, y + 205, 280, 42, App.hasil[lv.nomor] ? "Main lagi" : "Mainkan", () => App.ganti(new LayarLevel(i))));
+      return [x, y, lv];
+    });
+  }
+  gambar() {
+    latar(`Halo, ${App.nama}!`, "Pilih level. Disarankan mulai dari Level 1.");
+    for (const [x, y, lv] of this.kartu) {
+      kotak(x, y, x + 320, y + 265, 16, W.panel);
+      kotak(x, y, x + 320, y + 52, 16, W.biruMuda); ctx.fillStyle = W.biruMuda; ctx.fillRect(x, y + 36, 320, 16);
+      tulis(x + 20, y + 12, `Level ${lv.nomor}`, 14, true, W.primerGelap);
+      tulis(x + 20, y + 64, lv.judul, 13, true, W.teks, { lebar: 280 });
+      tulis(x + 20, y + 118, lv.indikator, 10, false, W.abu, { lebar: 280 });
+      const st = App.hasil[lv.nomor];
+      for (let k = 0; k < 3; k++) bintang(x + 36 + k * 34, y + 180, 13, st && k < st.bintang);
+      if (st) tulis(x + 140, y + 170, `Skor ${st.skor}/${st.skorMaks}`, 11, true, W.hijau);
+    }
+    gambarTombol(this.tombol);
+  }
+  klik(x, y) { const t = this.tombol.find(t => t.kena(x, y)); if (t) t.aksi(); }
+  ketik() {}
+}
+
+class LayarLevel {
+  constructor(idx) {
+    this.idx = idx; this.level = semuaLevel()[idx]; this.st = new StatusLevel(this.level);
+    this.input = ""; this.hover = null; this.disimpan = false; this.tombol = [];
+    this.grafik = new Grafik(620, 98, 440, this.level.rentang, this.level.grid);
+  }
+  setelah() {
+    if (this.st.selesai && !this.disimpan) { this.disimpan = true; App.catat(this.st); }
+    App.gambar();
+  }
+  cekIsian() { if (this.st.jawabIsian(this.input)) this.input = ""; this.setelah(); }
+  tekanAngka(k) {
+    if (k === "⌫") this.input = this.input.slice(0, -1);
+    else if (k === "−") this.input = this.input.startsWith("−") ? this.input.slice(1) : "−" + this.input;
+    else if (k === ",") { if (!this.input.includes(",")) this.input += ","; }
+    else if (this.input.length < 8) this.input += k;
+    App.gambar();
+  }
+  kursorGrafik(x, y) {
+    const l = this.st.langkah;
+    return l && (l.jenis === "plot" || l.jenis === "potong") && this.grafik.dariPx(x, y);
+  }
+  klik(x, y) {
+    const t = this.tombol.find(t => t.kena(x, y));
+    if (t) { t.aksi(); return; }
+    const l = this.st.langkah;
+    if (l && (l.jenis === "plot" || l.jenis === "potong")) {
+      const p = this.grafik.dariPx(x, y);
+      if (p) { this.hover = p; this.st.klikTitik(...p); this.setelah(); }
+    }
+  }
+  gerak(x, y) {
+    const p = this.grafik.dariPx(x, y);
+    const beda = (p === null) !== (this.hover === null) || (p && (p[0] !== this.hover[0] || p[1] !== this.hover[1]));
+    this.hover = p;
+    return beda;
+  }
+  ketik(k) {
+    const l = this.st.langkah; if (!l) return;
+    if (l.jenis === "isian") {
+      if (k === "Enter") return this.cekIsian();
+      if (k === "Backspace") return this.tekanAngka("⌫");
+      if (/^[0-9]$/.test(k)) return this.tekanAngka(k);
+      if (k === "-") return this.tekanAngka("−");
+      if (k === "," || k === ".") return this.tekanAngka(",");
+    } else if (l.jenis === "pilihan" && /^[1-4]$/.test(k)) {
+      const i = Number(k) - 1; if (i < l.opsi.length) { this.st.jawabPilihan(i); this.setelah(); }
+    }
+  }
+  gambar() {
+    const { level: lv, st } = this;
+    latar(`Level ${lv.nomor}: ${lv.judul}`, lv.indikator);
+    teksTitik(LEBAR - 170, 30, `Skor: ${st.skor}`, 15, true, "#fff", "right");
+    this.tombol = [tombolPojok("☰ Pilih Level", () => App.ganti(new LayarPilihLevel()))];
+    this.gambarGrafik();
+    st.selesai ? this.gambarSelesai() : this.gambarPanel();
+    gambarTombol(this.tombol);
+    this.gambarHover();
+  }
+  gambarPanel() {
+    const { st, level: lv } = this, l = st.langkah, x = 20, w = 555;
+    let y = 72;
+    const h = tinggiTeks(lv.cerita, w - 32, 10) + 34;
+    kotak(x, y, x + w, y + h, 12, W.panel);
+    tulis(x + 16, y + 8, "SOAL", 9, true, W.abu);
+    tulis(x + 16, y + 26, lv.cerita, 10, false, W.teks, { lebar: w - 32 });
+    y += h + 10;
+    const n = lv.langkah.length;
+    for (let i = 0; i < n; i++) lingkaran(x + 10 + i * 20, y + 8, 6, i < st.idx ? W.hijau : i === st.idx ? W.aksen : W.abuMuda);
+    tulis(x + 12 + n * 20, y - 2, `Langkah ${st.idx + 1}/${n} • ${l.tahap}`, 10, true, W.primer);
+    y += 24;
+    const hq = tinggiTeks(l.pertanyaan, w - 32, 12, true) + 22;
+    kotak(x, y, x + w, y + hq, 12, W.biruMuda, W.primer);
+    tulis(x + 16, y + 10, l.pertanyaan, 12, true, W.primerGelap, { lebar: w - 32 });
+    y += hq + 12;
+    if (l.jenis === "isian") y = this.areaIsian(x, y);
+    else if (l.jenis === "pilihan") y = this.areaPilihan(x, y, w, l.opsi);
+    else {
+      let t = l.jenis === "plot" ? "→ Klik titik-titik pada grafik di sebelah kanan." : "→ Klik titik potong pada grafik di sebelah kanan.";
+      if (l.jenis === "plot") t += `  (${(st.titikPlot[l.garis] || []).length}/2 titik)`;
+      tulis(x + 8, y, t, 12, true, l.garis ? W.garis2 : W.garis1, { lebar: w - 16 });
+      y += 30;
+    }
+    if (st.pesan) {
+      const isi = { true: W.hijauMuda, false: W.merahMuda, null: W.biruMuda }[st.pesanBenar];
+      const wt = { true: W.hijau, false: W.merah, null: W.primerGelap }[st.pesanBenar];
+      const hm = tinggiTeks(st.pesan, w - 32, 11, true) + 16;
+      kotak(x, y, x + w, y + hm, 10, isi);
+      tulis(x + 16, y + 8, st.pesan, 11, true, wt, { lebar: w - 32 });
+      y += hm + 8;
+    }
+    st.petunjukTampil.forEach((p, i) => {
+      const t = `Petunjuk ${i + 1}: ${p}`, hp = tinggiTeks(t, w - 32, 10) + 14;
+      kotak(x, y, x + w, y + hp, 10, W.kuningMuda, W.aksen);
+      tulis(x + 16, y + 7, t, 10, false, "#7B5B12", { lebar: w - 32 });
+      y += hp + 6;
+    });
+    const sisa = l.petunjuk.length - st.petunjukTampil.length, by = TINGGI - 58;
+    this.tombol.push(new Tombol(x, by, 200, 42, `Petunjuk (${sisa} lagi)`, () => { st.mintaPetunjuk(); App.gambar(); },
+      { warna: W.aksen, warnaTeks: W.teks, aktif: sisa > 0, ukuran: 11 }));
+    this.tombol.push(new Tombol(x + 212, by, 200, 42, "Lihat Pembahasan", () => { st.lihatPembahasan(); this.input = ""; this.setelah(); },
+      { warna: "#718096", ukuran: 11 }));
+  }
+  areaIsian(x, y) {
+    kotak(x, y, x + 170, y + 64, 12, "#fff", W.primer, 2);
+    teksTitik(x + 85, y + 32, this.input || "?", 22, true, this.input ? W.teks : W.abuMuda);
+    teksTitik(x + 85, y + 82, "ketik atau klik angka", 9, false, W.abu);
+    this.tombol.push(new Tombol(x, y + 100, 170, 44, "✔ Cek Jawaban", () => this.cekIsian(), { warna: W.hijau }));
+    [["7", "8", "9", "⌫"], ["4", "5", "6", "−"], ["1", "2", "3", ","], ["0"]].forEach((baris, r) =>
+      baris.forEach((lb, k) => this.tombol.push(new Tombol(x + 190 + k * 60, y + r * 40, 52, 34, lb, () => this.tekanAngka(lb),
+        { warna: "⌫−,".includes(lb) ? "#4A5568" : W.primer, ukuran: 13 }))));
+    return y + 160;
+  }
+  areaPilihan(x, y, w, opsi) {
+    opsi.forEach((o, i) => {
+      const t = `${"ABCD"[i]}.  ${o}`, h = Math.max(40, tinggiTeks(t, w - 30, 11) + 14);
+      this.tombol.push(new Tombol(x, y, w, h, t, () => { this.st.jawabPilihan(i); this.setelah(); },
+        { warna: "#fff", warnaTeks: W.teks, ukuran: 11, rata: "left" }));
+      y += h + 10;
+    });
+    return y + 2;
+  }
+  garisUntuk(i) { for (const l of this.level.langkah.slice(i)) if (l.jenis === "plot") return l.garis; return 0; }
+  gambarGrafik() {
+    const { grafik: g, st, level: lv } = this, warna = [W.garis1, W.garis2];
+    g.gambarDasar();
+    [...st.garisSelesai].sort().forEach(i => g.gambarGaris(lv.persamaan[i], warna[i], `Garis ${i + 1}`));
+    lv.langkah.slice(0, st.idx).forEach((l, i) => {
+      if (l.titikHasil) g.titik(...l.titikHasil, warna[this.garisUntuk(i)], 5, fmtTitik(...l.titikHasil), true);
+    });
+    for (const k in st.titikPlot) st.titikPlot[k].forEach(t => g.titik(...t, warna[k], 6));
+    const l = st.langkah;
+    if (l && l.jenis === "plot" && st.petunjukTampil.length >= 2)
+      l.titik.forEach(t => { const [px, py] = g.kePx(...t); lingkaran(px, py, 13, null, W.aksen, 3, [4, 3]); });
+    if (st.potong) { g.proyeksi(...st.potong, W.potong); g.titik(...st.potong, W.potong, 8, "Titik potong " + fmtTitik(...st.potong)); }
+    const y = g.y + g.ukuran + 44;
+    lv.persamaan.forEach((p, i) => {
+      garis(640 + i * 220, y, 670 + i * 220, y, warna[i], 4);
+      teksTitik(678 + i * 220, y, `Garis ${i + 1}: ${p.teks()}`, 11, true, warna[i], "left");
+    });
+  }
+  gambarHover() {
+    const l = this.st.langkah;
+    if (!this.hover || !l || (l.jenis !== "plot" && l.jenis !== "potong")) return;
+    const g = this.grafik, [x, y] = this.hover, [px, py] = g.kePx(x, y);
+    lingkaran(px, py, 9, null, W.aksen, 2);
+    const bx = px < g.x + g.ukuran - 80 ? px + 14 : px - 84;
+    ctx.fillStyle = W.teks; ctx.fillRect(bx, py - 30, 70, 20);
+    teksTitik(bx + 35, py - 20, fmtTitik(x, y), 10, true, "#fff");
+  }
+  gambarSelesai() {
+    const { st, level: lv } = this, x = 20, w = 555;
+    kotak(x, 72, x + w, TINGGI - 16, 16, W.panel);
+    teksTitik(x + w / 2, 115, "Level Selesai!", 22, true, W.hijau);
+    for (let k = 0; k < 3; k++) bintang(x + w / 2 - 70 + k * 70, 178, 28, k < st.bintang);
+    teksTitik(x + w / 2, 235, `Skor ${st.skor} dari ${st.skorMaks}`, 15, true, W.teks);
+    let y = 262;
+    if (st.pesan) y += tulis(x + 24, y, st.pesan, 10, false, W.abu, { lebar: w - 48 }) + 8;
+    const perlu = st.perluLatihan;
+    if (perlu.length) {
+      y += tulis(x + 24, y, "Bagian yang masih perlu dilatih:", 12, true, W.merah);
+      perlu.forEach(t => { y += tulis(x + 36, y, "• " + t, 11); });
+    } else y += tulis(x + 24, y, "Hebat! Semua langkah benar tanpa bantuan.", 12, true, W.hijau);
+    const tp = titikPotong(...lv.persamaan);
+    tulis(x + 24, y + 10, `Kesimpulan: titik potong ${fmtTitik(...tp)} memenuhi kedua persamaan, sehingga menjadi penyelesaian SPLDV.`,
+      11, false, W.primerGelap, { lebar: w - 48 });
+    const by = TINGGI - 76;
+    if (this.idx + 1 < 5) this.tombol.push(new Tombol(x + 24, by, 220, 46, "Level Berikutnya ▶", () => App.ganti(new LayarLevel(this.idx + 1)), { warna: W.hijau }));
+    else this.tombol.push(new Tombol(x + 24, by, 220, 46, "Lihat Hasil", () => App.ganti(new LayarHasil()), { warna: W.hijau }));
+    this.tombol.push(new Tombol(x + 260, by, 130, 46, "↻ Ulangi", () => App.ganti(new LayarLevel(this.idx)), { warna: W.primerGelap }));
+  }
+}
+
+class LayarHasil {
+  constructor() {
+    this.tombol = [tombolPojok("⌂ Menu", () => App.ganti(new LayarMenu())),
+      new Tombol(24, TINGGI - 66, 200, 46, "☰ Pilih Level", () => App.ganti(App.nama ? new LayarPilihLevel() : new LayarMenu())),
+      new Tombol(240, TINGGI - 66, 260, 46, "Salin Data Hasil (CSV)", () => this.salin(), { warna: W.hijau })];
+  }
+  salin() {
+    const r = bacaRiwayat();
+    const kolom = ["waktu", "nama", "level", "judul", "indikator", "skor", "skor_maks", "bintang", "tahap_perlu_latihan", "rincian"];
+    const csv = [kolom.join(";"), ...r.map(b => kolom.map(k => String(b[k] ?? "").replace(/;/g, ",")).join(";"))].join("\n");
+    const ok = () => { App.pesanSalin = `${r.length} baris data tersalin. Tempel (Ctrl+V) di Excel atau Notepad.`; App.gambar(); };
+    if (!r.length) { App.pesanSalin = "Belum ada data. Selesaikan minimal satu level dulu."; App.gambar(); return; }
+    try { navigator.clipboard.writeText(csv).then(ok, () => { App.pesanSalin = "Gagal menyalin. Coba lagi."; App.gambar(); }); }
+    catch (e) { App.pesanSalin = "Browser ini tidak mengizinkan menyalin."; App.gambar(); }
+  }
+  gambar() {
+    latar("Hasil Belajar", `Nama: ${App.nama || "-"}`);
+    kotak(20, 74, LEBAR - 20, TINGGI - 84, 16, W.panel);
+    const kol = [40, 120, 420, 520, 640];
+    ["Level", "Judul", "Skor", "Bintang", "Bagian yang perlu dilatih"].forEach((j, i) => tulis(kol[i], 92, j, 11, true, W.abu));
+    garis(36, 120, LEBAR - 36, 120, W.abuMuda);
+    let y = 132, total = 0, maks = 0;
+    for (const lv of semuaLevel()) {
+      const st = App.hasil[lv.nomor]; let h = 20;
+      tulis(kol[0], y, String(lv.nomor), 12, true);
+      tulis(kol[1], y, lv.judul, 11, false, W.teks, { lebar: 290 });
+      if (st) {
+        total += st.skor; maks += st.skorMaks;
+        tulis(kol[2], y, `${st.skor}/${st.skorMaks}`, 12, true);
+        for (let k = 0; k < 3; k++) bintang(kol[3] + 12 + k * 28, y + 11, 10, k < st.bintang);
+        const p = st.perluLatihan;
+        h = tulis(kol[4], y, p.join(", ") || "Semua langkah sudah dikuasai", 10, false, p.length ? W.merah : W.hijau, { lebar: 400 });
+      } else tulis(kol[2], y, "belum dimainkan", 10, false, W.abu);
+      y += Math.max(44, h + 16);
+      garis(36, y - 8, LEBAR - 36, y - 8, W.grid);
+    }
+    if (maks) tulis(40, y + 4, `Total skor: ${total} dari ${maks}`, 14, true, W.primerGelap);
+    const infoKirim = !URL_REKAP ? "Data tiap level tersimpan di browser ini. Klik tombol hijau untuk menyalinnya."
+      : statusKirim.terakhir === "gagal" ? "Belum terkirim ke guru (cek internet). Akan dikirim ulang otomatis."
+      : "Hasil setiap level otomatis dikirim ke rekap guru.";
+    tulis(520, TINGGI - 60, App.pesanSalin || infoKirim, 9, false, W.abu, { lebar: 550 });
+    gambarTombol(this.tombol);
+  }
+  klik(x, y) { const t = this.tombol.find(t => t.kena(x, y)); if (t) t.aksi(); }
+  ketik() {}
+}
+
+/* ---------------- event ---------------- */
+function posisi(e) {
+  const r = kanvas.getBoundingClientRect();
+  return [(e.clientX - r.left) * LEBAR / r.width, (e.clientY - r.top) * TINGGI / r.height];
+}
+kanvas.addEventListener("pointerdown", e => {
+  const [x, y] = posisi(e); App.mouse = [x, y];
+  if (App.layar instanceof LayarLevel) App.layar.gerak(x, y);
+  App.layar.klik(x, y);
+});
+kanvas.addEventListener("pointermove", e => {
+  const [x, y] = posisi(e); const lama = App.mouse; App.mouse = [x, y];
+  const l = App.layar;
+  const ubahHover = l.gerak ? l.gerak(x, y) : false;
+  const kenaLama = (l.tombol || []).find(t => t.kena(...lama)), kenaBaru = (l.tombol || []).find(t => t.kena(x, y));
+  if (ubahHover || kenaLama !== kenaBaru) App.gambar();
+});
+kanvas.addEventListener("pointerleave", () => { App.mouse = [-1, -1]; if (App.layar.gerak) App.layar.gerak(-1, -1); App.gambar(); });
+window.addEventListener("keydown", e => {
+  if (document.activeElement === inputNama) {
+    if (e.key === "Enter") App.layar.mulai && App.layar.mulai();
+    else if (App.layar.pesan) { App.layar.pesan = ""; App.gambar(); }
+    return;
+  }
+  App.layar.ketik(e.key);
+});
+inputNama.addEventListener("input", () => { App.nama = inputNama.value.trim(); });
+window.addEventListener("resize", () => { aturDPR(); App.gambar(); });
+
+App.ganti(new LayarMenu());
+if (URL_REKAP && bacaAntre().length) kirimRekap(null);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => App.gambar());
+</script>
+</body>
+</html>
