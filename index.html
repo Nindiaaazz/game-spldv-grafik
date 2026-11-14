@@ -33,7 +33,7 @@
 <div id="putar">Agar lebih nyaman, putar HP ke posisi mendatar (landscape).</div>
 <div id="wadah">
   <canvas id="kanvas" width="1100" height="700" aria-label="Game Petualangan Grafik SPLDV"></canvas>
-  <input id="nama" type="text" maxlength="40" placeholder="ketik di sini..." autocomplete="off" aria-label="Nama atau NIM">
+  <input id="nama" type="text" maxlength="40" placeholder="ketik di sini..." autocomplete="off" aria-label="Nama">
 </div>
 <p id="catatan">Versi web dari game Python "Petualangan Grafik SPLDV" — SPLDV metode grafik kelas VIII.</p>
 <script>
@@ -636,7 +636,7 @@ class LayarMenu {
     teksTitik(cx, 110, "Petualangan Grafik SPLDV", 30, true, W.primerGelap);
     teksTitik(cx, 158, "Belajar Sistem Persamaan Linear Dua Variabel dengan metode grafik", 13, false, W.abu);
     teksTitik(cx, 186, "Tentukan titik → gambar garis → temukan titik potong → simpulkan!", 11, false, W.hijau, "center", "middle", true);
-    teksTitik(LEBAR / 2 - 160, 290, "Nama / NIM kamu:", 12, true, W.teks, "left");
+    teksTitik(LEBAR / 2 - 160, 290, "Nama kamu:", 12, true, W.teks, "left");
     if (this.pesan) teksTitik(LEBAR / 2, 380, this.pesan, 11, true, W.merah);
     gambarTombol(this.tombol);
     teksTitik(LEBAR - 16, TINGGI - 14, "Draft v0.1 (versi web) • SPLDV metode grafik kelas VIII", 9, false, W.abu, "right");
